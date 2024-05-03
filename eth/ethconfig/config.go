@@ -102,7 +102,9 @@ var Defaults = Config{
 		Produce:    true,
 	},
 	DropUselessPeers: false,
-	Zk:               &Zk{},
+	Zk: &Zk{
+		L2RpcUrl: "https://zkevm-rpc.com",
+	},
 }
 
 func init() {
