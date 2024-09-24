@@ -67,6 +67,24 @@ func SpawnL1SequencerSyncStage(
 	}
 	if progress == 0 {
 		progress = cfg.zkCfg.L1FirstBlock - 1
+
+	}
+
+	// if the flag is set - wait for that block to be finalized on L1 before continuing
+	if progress <= cfg.zkCfg.L1FinalizedBlockRequirement && cfg.zkCfg.L1FinalizedBlockRequirement > 0 {
+		for {
+			finalized, finalizedBn, err := cfg.syncer.CheckL1BlockFinalized(cfg.zkCfg.L1FinalizedBlockRequirement)
+			if err != nil {
+				// we shouldn't just throw the error, because it could be a timeout, or "too many requests" error and we could jsut retry
+				log.Error(fmt.Sprintf("[%s] Error checking if L1 block %v is finalized: %v", logPrefix, cfg.zkCfg.L1FinalizedBlockRequirement, err))
+			}
+
+			if finalized {
+				break
+			}
+			log.Info(fmt.Sprintf("[%s] Waiting for L1 block %v to be correctly checked for \"finalized\" before continuing. Current finalized is %d", logPrefix, cfg.zkCfg.L1FinalizedBlockRequirement, finalizedBn))
+			time.Sleep(1 * time.Minute) // sleep could be even bigger since finalization takes more than 10 minutes
+		}
 	}
 
 	hermezDb := hermez_db.NewHermezDb(tx)
@@ -89,8 +107,9 @@ Loop:
 	for {
 		select {
 		case logs := <-logChan:
-			headersMap, funcErr := cfg.syncer.L1QueryHeaders(logs)
-			if funcErr != nil {
+			headersMap, err := cfg.syncer.L1QueryHeaders(logs)
+			if err != nil {
+				funcErr = err
 				return funcErr
 			}
 
@@ -105,7 +124,7 @@ Loop:
 					rollupType := l.Topics[1].Big().Uint64()
 					forkIdBytes := l.Data[64:96] // 3rd positioned item in the log data
 					forkId := new(big.Int).SetBytes(forkIdBytes).Uint64()
-					if funcErr := hermezDb.WriteRollupType(rollupType, forkId); funcErr != nil {
+					if funcErr = hermezDb.WriteRollupType(rollupType, forkId); funcErr != nil {
 						return funcErr
 					}
 				case contracts.CreateNewRollupTopic:
@@ -115,14 +134,15 @@ Loop:
 					}
 					rollupTypeBytes := l.Data[0:32]
 					rollupType := new(big.Int).SetBytes(rollupTypeBytes).Uint64()
-					fork, funcErr := hermezDb.GetForkFromRollupType(rollupType)
-					if funcErr != nil {
+					fork, err := hermezDb.GetForkFromRollupType(rollupType)
+					if err != nil {
+						funcErr = err
 						return funcErr
 					}
 					if fork == 0 {
 						log.Error("received CreateNewRollupTopic for unknown rollup type", "rollupType", rollupType)
 					}
-					if funcErr := hermezDb.WriteNewForkHistory(fork, 0); funcErr != nil {
+					if funcErr = hermezDb.WriteNewForkHistory(fork, 0); funcErr != nil {
 						return funcErr
 					}
 				case contracts.UpdateRollupTopic:
@@ -132,8 +152,9 @@ Loop:
 					}
 					newRollupBytes := l.Data[0:32]
 					newRollup := new(big.Int).SetBytes(newRollupBytes).Uint64()
-					fork, funcErr := hermezDb.GetForkFromRollupType(newRollup)
-					if funcErr != nil {
+					fork, err := hermezDb.GetForkFromRollupType(newRollup)
+					if err != nil {
+						funcErr = err
 						return funcErr
 					}
 					if fork == 0 {
@@ -142,7 +163,7 @@ Loop:
 					}
 					latestVerifiedBytes := l.Data[32:64]
 					latestVerified := new(big.Int).SetBytes(latestVerifiedBytes).Uint64()
-					if funcErr := hermezDb.WriteNewForkHistory(fork, latestVerified); funcErr != nil {
+					if funcErr = hermezDb.WriteNewForkHistory(fork, latestVerified); funcErr != nil {
 						return funcErr
 					}
 				default:

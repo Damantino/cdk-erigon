@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
@@ -50,6 +51,7 @@ const FORK_HISTORY = "fork_history"                                     // index
 const JUST_UNWOUND = "just_unwound"                                     // batch number -> true
 const PLAIN_STATE_VERSION = "plain_state_version"                       // batch number -> true
 const ERIGON_VERSIONS = "erigon_versions"                               // erigon version -> timestamp of startup
+const BATCH_ENDS = "batch_ends"                                         //
 
 var HermezDbTables = []string{
 	L1VERIFICATIONS,
@@ -85,6 +87,7 @@ var HermezDbTables = []string{
 	JUST_UNWOUND,
 	PLAIN_STATE_VERSION,
 	ERIGON_VERSIONS,
+	BATCH_ENDS,
 }
 
 type HermezDb struct {
@@ -1014,6 +1017,9 @@ func (db *HermezDb) deleteFromBucketWithUintKeysRange(bucket string, fromBlockNu
 }
 
 func (db *HermezDbReader) GetForkId(batchNo uint64) (uint64, error) {
+	if batchNo == 0 {
+		batchNo = 1
+	}
 	v, err := db.tx.GetOne(FORKIDS, Uint64ToBytes(batchNo))
 	if err != nil {
 		return 0, err
@@ -1411,7 +1417,7 @@ func (db *HermezDb) WriteBatchCounters(blockNumber uint64, counters []int) error
 	return db.tx.Put(BATCH_COUNTERS, Uint64ToBytes(blockNumber), countersJson)
 }
 
-func (db *HermezDbReader) GetLatestBatchCounters(batchNumber uint64) (countersMap []int, found bool, err error) {
+func (db *HermezDbReader) GetLatestBatchCounters(batchNumber uint64) (countersArray []int, found bool, err error) {
 	batchBlockNumbers, err := db.GetL2BlockNosByBatch(batchNumber)
 	if err != nil {
 		return nil, false, err
@@ -1424,12 +1430,12 @@ func (db *HermezDbReader) GetLatestBatchCounters(batchNumber uint64) (countersMa
 	found = len(v) > 0
 
 	if found {
-		if err = json.Unmarshal(v, &countersMap); err != nil {
+		if err = json.Unmarshal(v, &countersArray); err != nil {
 			return nil, false, err
 		}
 	}
 
-	return countersMap, found, nil
+	return countersArray, found, nil
 }
 
 func (db *HermezDb) DeleteBatchCounters(fromBlockNum, toBlockNum uint64) error {
@@ -1743,4 +1749,108 @@ func (db *HermezDb) WriteErigonVersion(version string, timestamp time.Time) (boo
 
 	// write new version
 	return true, db.tx.Put(ERIGON_VERSIONS, []byte(version), Uint64ToBytes(uint64(timestamp.Unix())))
+}
+
+func (db *HermezDb) WriteBatchEnd(blockNo uint64) error {
+	key := Uint64ToBytes(blockNo)
+	return db.tx.Put(BATCH_ENDS, key, []byte{1})
+}
+
+func (db *HermezDbReader) GetBatchEnd(blockNo uint64) (bool, error) {
+	v, err := db.tx.GetOne(BATCH_ENDS, Uint64ToBytes(blockNo))
+	if err != nil {
+		return false, err
+	}
+	return len(v) > 0, nil
+}
+
+func (db *HermezDb) DeleteBatchEnds(from, to uint64) error {
+	return db.deleteFromBucketWithUintKeysRange(BATCH_ENDS, from, to)
+}
+
+func (db *HermezDbReader) GetAllForkIntervals() ([]types.ForkInterval, error) {
+	return db.getForkIntervals(nil)
+}
+
+func (db *HermezDbReader) GetForkInterval(forkID uint64) (*types.ForkInterval, bool, error) {
+	forkIntervals, err := db.getForkIntervals(&forkID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if len(forkIntervals) == 0 {
+		return nil, false, err
+	}
+
+	forkInterval := forkIntervals[0]
+	return &forkInterval, true, nil
+}
+
+func (db *HermezDbReader) getForkIntervals(forkIdFilter *uint64) ([]types.ForkInterval, error) {
+	mapForkIntervals := map[uint64]types.ForkInterval{}
+
+	c, err := db.tx.Cursor(FORKIDS)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	lastForkId := uint64(0)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+
+		batchNumber := BytesToUint64(k)
+		forkID := BytesToUint64(v)
+
+		if forkID > lastForkId {
+			lastForkId = forkID
+		}
+
+		if forkIdFilter != nil && *forkIdFilter != forkID {
+			continue
+		}
+
+		mapInterval, found := mapForkIntervals[forkID]
+		if !found {
+			mapInterval = types.ForkInterval{
+				ForkID:          forkID,
+				FromBatchNumber: batchNumber,
+				ToBatchNumber:   batchNumber,
+			}
+		}
+
+		if batchNumber < mapInterval.FromBatchNumber {
+			mapInterval.FromBatchNumber = batchNumber
+		}
+
+		if batchNumber > mapInterval.ToBatchNumber {
+			mapInterval.ToBatchNumber = batchNumber
+		}
+
+		mapForkIntervals[forkID] = mapInterval
+	}
+
+	forkIntervals := make([]types.ForkInterval, 0, len(mapForkIntervals))
+	for forkId, forkInterval := range mapForkIntervals {
+		blockNumber, found, err := db.GetForkIdBlock(forkInterval.ForkID)
+		if err != nil {
+			return nil, err
+		} else if found {
+			forkInterval.BlockNumber = blockNumber
+		}
+
+		if forkId == lastForkId {
+			forkInterval.ToBatchNumber = math.MaxUint64
+		}
+
+		forkIntervals = append(forkIntervals, forkInterval)
+	}
+
+	sort.Slice(forkIntervals, func(i, j int) bool {
+		return forkIntervals[i].FromBatchNumber < forkIntervals[j].FromBatchNumber
+	})
+
+	return forkIntervals, nil
 }
