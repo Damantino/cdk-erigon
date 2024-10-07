@@ -760,9 +760,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		// entering ZK territory!
 		cfg := backend.config
 
-		// update the chain config with the zero gas from the flags
-		backend.chainConfig.SupportGasless = cfg.Gasless
-
+		backend.chainConfig.AllowFreeTransactions = cfg.AllowFreeTransactions
+		backend.chainConfig.ZkDefaultGasPrice = cfg.DefaultGasPrice
 		l1Urls := strings.Split(cfg.L1RpcUrl, ",")
 
 		if cfg.Zk.L1CacheEnabled {
@@ -849,17 +848,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 		log.Info("Rollup ID", "rollupId", cfg.L1RollupId)
 
-		// check contract addresses in config against L1
-		if cfg.Zk.L1ContractAddressCheck {
-			success, err := l1ContractAddressCheck(ctx, cfg.Zk, backend.l1Syncer)
-			if !success || err != nil {
-				//log.Warn("Contract address check failed", "success", success, "err", err)
-				panic("Contract address check failed")
-			}
-			log.Info("Contract address check passed")
-		} else {
-			log.Info("Contract address check skipped")
-		}
+		// Check if L1 contracts addresses should be retrieved from the L1 chain
+		l1ContractAddressProcess(ctx, cfg.Zk, backend.l1Syncer)
 
 		l1InfoTreeSyncer := syncer.NewL1Syncer(
 			ctx,
@@ -1555,23 +1545,71 @@ func checkPortIsFree(addr string) (free bool) {
 	return false
 }
 
+func l1ContractAddressProcess(ctx context.Context, cfg *ethconfig.Zk, l1BlockSyncer *syncer.L1Syncer) {
+	if cfg.L1ContractAddressRetrieve {
+		l1ContractAddress(ctx, cfg, l1BlockSyncer)
+		return
+	}
+	l1ContractAddressValidate(ctx, cfg, l1BlockSyncer)
+}
+
+func l1ContractAddress(ctx context.Context, cfg *ethconfig.Zk, l1BlockSyncer *syncer.L1Syncer) {
+	if err := l1ContractAdressFromZKevm(ctx, cfg, l1BlockSyncer); err != nil {
+		panic("Failed to retrieve contract addresses from L1")
+	}
+	log.Info("Contract addresses retrieved from L1")
+}
+
+func l1ContractAdressFromZKevm(ctx context.Context, cfg *ethconfig.Zk, l1BlockSyncer *syncer.L1Syncer) error {
+	l1AddrRollup, err := l1BlockSyncer.CallRollupManager(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return err
+	}
+	cfg.AddressRollup = l1AddrRollup
+
+	l1AddrGerManager, err := l1BlockSyncer.CallGlobalExitRootManager(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return err
+	}
+	cfg.AddressGerManager = l1AddrGerManager
+
+	l1AddrSequencer, err := l1BlockSyncer.CallTrustedSequencer(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return err
+	}
+	cfg.AddressSequencer = l1AddrSequencer
+
+	return nil
+}
+
+func l1ContractAddressValidate(ctx context.Context, cfg *ethconfig.Zk, l1BlockSyncer *syncer.L1Syncer) {
+	if !cfg.L1ContractAddressCheck {
+		log.Info("Contract address check skipped")
+		return
+	}
+
+	success, err := l1ContractAddressCheck(ctx, cfg, l1BlockSyncer)
+	if !success || err != nil {
+		panic("Contract address check failed")
+	}
+
+	log.Info("Contract address check passed")
+}
+
 func l1ContractAddressCheck(ctx context.Context, cfg *ethconfig.Zk, l1BlockSyncer *syncer.L1Syncer) (bool, error) {
 	l1AddrRollup, err := l1BlockSyncer.CallRollupManager(ctx, &cfg.AddressZkevm)
 	if err != nil {
+		log.Warn("L1 contract address check failed (RollupManager)", "err", err)
 		return false, err
 	}
 	if l1AddrRollup != cfg.AddressRollup {
 		log.Warn("L1 contract address check failed (AddressRollup)", "expected", cfg.AddressRollup, "actual", l1AddrRollup)
 		return false, nil
 	}
+	log.Warn("🚨 zkevm.address-rollup configuration parameter is deprecated and it will be removed in upcoming releases")
 
-	l1AddrAdmin, err := l1BlockSyncer.CallAdmin(ctx, &cfg.AddressZkevm)
-	if err != nil {
-		return false, err
-	}
-	if l1AddrAdmin != cfg.AddressAdmin {
-		log.Warn("L1 contract address check failed (AddressAdmin)", "expected", cfg.AddressAdmin, "actual", l1AddrAdmin)
-		return false, nil
+	if cfg.AddressAdmin != (libcommon.Address{}) {
+		log.Warn("🚨 zkevm.address-admin configuration parameter is deprecated and it will be removed in upcoming releases")
 	}
 
 	l1AddrGerManager, err := l1BlockSyncer.CallGlobalExitRootManager(ctx, &cfg.AddressZkevm)
@@ -1582,6 +1620,7 @@ func l1ContractAddressCheck(ctx context.Context, cfg *ethconfig.Zk, l1BlockSynce
 		log.Warn("L1 contract address check failed (AddressGerManager)", "expected", cfg.AddressGerManager, "actual", l1AddrGerManager)
 		return false, nil
 	}
+	log.Warn("🚨 zkevm.address-ger-manager configuration parameter is deprecated and it will be removed in upcoming releases")
 
 	l1AddrSequencer, err := l1BlockSyncer.CallTrustedSequencer(ctx, &cfg.AddressZkevm)
 	if err != nil {
@@ -1591,5 +1630,7 @@ func l1ContractAddressCheck(ctx context.Context, cfg *ethconfig.Zk, l1BlockSynce
 		log.Warn("L1 contract address check failed (AddressSequencer)", "expected", cfg.AddressSequencer, "actual", l1AddrSequencer)
 		return false, nil
 	}
+	log.Warn("🚨 zkevm.address-sequencer configuration parameter is deprecated and it will be removed in upcoming releases")
+
 	return true, nil
 }

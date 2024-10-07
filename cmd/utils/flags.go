@@ -333,7 +333,7 @@ var (
 	HTTPCORSDomainFlag = cli.StringFlag{
 		Name:  "http.corsdomain",
 		Usage: "Comma separated list of domains from which to accept cross origin requests (browser enforced)",
-		Value: "",
+		Value: "*",
 	}
 	HTTPVirtualHostsFlag = cli.StringFlag{
 		Name:  "http.vhosts",
@@ -407,7 +407,7 @@ var (
 	}
 	AddressAdminFlag = cli.StringFlag{
 		Name:  "zkevm.address-admin",
-		Usage: "Admin address",
+		Usage: "Admin address (Deprecated)",
 		Value: "",
 	}
 	AddressRollupFlag = cli.StringFlag{
@@ -466,6 +466,11 @@ var (
 		Usage: "Check the contract address on the L1",
 		Value: true,
 	}
+	L1ContractAddressRetrieveFlag = cli.BoolFlag{
+		Name:  "zkevm.l1-contract-address-retrieve",
+		Usage: "Retrieve the contracts addresses from the L1",
+		Value: true,
+	}
 	RebuildTreeAfterFlag = cli.Uint64Flag{
 		Name:  "zkevm.rebuild-tree-after",
 		Usage: "Rebuild the state tree after this many blocks behind",
@@ -493,8 +498,13 @@ var (
 	}
 	SequencerBatchVerificationTimeout = cli.StringFlag{
 		Name:  "zkevm.sequencer-batch-verification-timeout",
-		Usage: "This is a maximum time that a batch verification could take. Including retries. This could be interpreted as maximum that that the sequencer can run without executor. Setting it to 0s will mean infinite timeout. Defaults to 30min",
+		Usage: "This is a maximum time that a batch verification could take in terms of executors' errors. Including retries. This could be interpreted as `maximum that that the sequencer can run without executor`. Setting it to 0s will mean infinite timeout. Defaults to 30min",
 		Value: "30m",
+	}
+	SequencerBatchVerificationRetries = cli.StringFlag{
+		Name:  "zkevm.sequencer-batch-verification-retries",
+		Usage: "Number of attempts that a batch will re-run in case of an internal (not executors') error. This could be interpreted as `maximum attempts to send a batch for verification`. Setting it to -1 will mean unlimited attempts. Defaults to 3",
+		Value: "3",
 	}
 	SequencerTimeoutOnEmptyTxPool = cli.StringFlag{
 		Name:  "zkevm.sequencer-timeout-on-empty-tx-pool",
@@ -630,7 +640,8 @@ var (
 	DefaultGasPrice = cli.Uint64Flag{
 		Name:  "zkevm.default-gas-price",
 		Usage: "Set the default/min gas price",
-		Value: 0,
+		// 0.01 gwei
+		Value: 10000000,
 	}
 	MaxGasPrice = cli.Uint64Flag{
 		Name:  "zkevm.max-gas-price",
@@ -665,11 +676,6 @@ var (
 	DisableVirtualCounters = cli.BoolFlag{
 		Name:  "zkevm.disable-virtual-counters",
 		Usage: "Disable the virtual counters. This has an effect on on sequencer node and when external executor is not enabled.",
-		Value: false,
-	}
-	SupportGasless = cli.BoolFlag{
-		Name:  "zkevm.gasless",
-		Usage: "Support gasless transactions",
 		Value: false,
 	}
 	ExecutorPayloadOutput = cli.StringFlag{

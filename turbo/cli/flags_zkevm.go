@@ -16,6 +16,11 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+var DeprecatedFlags = map[string]string{
+	"zkevm.gasless":       "zkevm.allow-free-transactions",
+	"zkevm.rpc-ratelimit": "",
+}
+
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	checkFlag := func(flagName string, value interface{}) {
 		switch v := value.(type) {
@@ -131,7 +136,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L1FirstBlock:                           ctx.Uint64(utils.L1FirstBlockFlag.Name),
 		L1FinalizedBlockRequirement:            ctx.Uint64(utils.L1FinalizedBlockRequirementFlag.Name),
 		L1ContractAddressCheck:                 ctx.Bool(utils.L1ContractAddressCheckFlag.Name),
-		RpcRateLimits:                          ctx.Int(utils.RpcRateLimitsFlag.Name),
+		L1ContractAddressRetrieve:              ctx.Bool(utils.L1ContractAddressRetrieveFlag.Name),
 		RpcGetBatchWitnessConcurrencyLimit:     ctx.Int(utils.RpcGetBatchWitnessConcurrencyLimitFlag.Name),
 		DatastreamVersion:                      ctx.Int(utils.DatastreamVersionFlag.Name),
 		RebuildTreeAfter:                       ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
@@ -140,6 +145,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		SequencerBlockSealTime:                 sequencerBlockSealTime,
 		SequencerBatchSealTime:                 sequencerBatchSealTime,
 		SequencerBatchVerificationTimeout:      sequencerBatchVerificationTimeout,
+		SequencerBatchVerificationRetries:      ctx.Int(utils.SequencerBatchVerificationRetries.Name),
 		SequencerTimeoutOnEmptyTxPool:          sequencerTimeoutOnEmptyTxPool,
 		SequencerHaltOnBatchNumber:             ctx.Uint64(utils.SequencerHaltOnBatchNumber.Name),
 		SequencerResequence:                    ctx.Bool(utils.SequencerResequence.Name),
@@ -163,7 +169,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		GasPriceFactor:                         ctx.Float64(utils.GasPriceFactor.Name),
 		WitnessFull:                            ctx.Bool(utils.WitnessFullFlag.Name),
 		SyncLimit:                              ctx.Uint64(utils.SyncLimit.Name),
-		Gasless:                                ctx.Bool(utils.SupportGasless.Name),
 		DebugTimers:                            ctx.Bool(utils.DebugTimers.Name),
 		DebugNoSync:                            ctx.Bool(utils.DebugNoSync.Name),
 		DebugLimit:                             ctx.Uint64(utils.DebugLimit.Name),
@@ -212,21 +217,17 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
-	checkFlag(utils.AddressSequencerFlag.Name, cfg.AddressSequencer)
-	checkFlag(utils.AddressAdminFlag.Name, cfg.AddressAdmin)
-	checkFlag(utils.AddressRollupFlag.Name, cfg.AddressRollup)
 	checkFlag(utils.AddressZkevmFlag.Name, cfg.AddressZkevm)
-	checkFlag(utils.AddressGerManagerFlag.Name, cfg.AddressGerManager)
 
 	checkFlag(utils.L1ChainIdFlag.Name, cfg.L1ChainId)
 	checkFlag(utils.L1RpcUrlFlag.Name, cfg.L1RpcUrl)
 	checkFlag(utils.L1MaticContractAddressFlag.Name, cfg.L1MaticContractAddress.Hex())
 	checkFlag(utils.L1FirstBlockFlag.Name, cfg.L1FirstBlock)
-	checkFlag(utils.RpcRateLimitsFlag.Name, cfg.RpcRateLimits)
 	checkFlag(utils.RpcGetBatchWitnessConcurrencyLimitFlag.Name, cfg.RpcGetBatchWitnessConcurrencyLimit)
 	checkFlag(utils.RebuildTreeAfterFlag.Name, cfg.RebuildTreeAfter)
 	checkFlag(utils.L1BlockRangeFlag.Name, cfg.L1BlockRange)
 	checkFlag(utils.L1QueryDelayFlag.Name, cfg.L1QueryDelay)
 	checkFlag(utils.TxPoolRejectSmartContractDeployments.Name, cfg.TxPoolRejectSmartContractDeployments)
 	checkFlag(utils.L1ContractAddressCheckFlag.Name, cfg.L1ContractAddressCheck)
+	checkFlag(utils.L1ContractAddressRetrieveFlag.Name, cfg.L1ContractAddressCheck)
 }
